@@ -5,6 +5,8 @@ from django import forms
 
 from ..models import Group, Post
 
+from yatube.settings import FILL
+
 User = get_user_model()
 
 
@@ -36,19 +38,16 @@ class PostViewsTest(TestCase):
 
         cls.templates_pages_names = {
             reverse('posts:index'): 'posts/index.html',
-            reverse(
-                'posts:group_list', kwargs={'slug': 'test_slug'}
-            ): 'posts/group_list.html',
-            reverse(
-                'posts:profile', kwargs={'username': 'author'}
-            ): 'posts/profile.html',
-            reverse(
-                'posts:post_detail', kwargs={'post_id': '1'}
-            ): 'posts/post_detail.html',
+            reverse('posts:group_list', args=[PostViewsTest.group.slug]):
+            'posts/group_list.html',
+            reverse('posts:profile',
+                    args=[PostViewsTest.user.username]):
+            'posts/profile.html',
+            reverse('posts:post_detail', args=[PostViewsTest.post.id]):
+            'posts/post_detail.html',
+            reverse('posts:post_edit', args=[PostViewsTest.post.id]):
+            'posts/create_post.html',
             reverse('posts:post_create'): 'posts/create_post.html',
-            reverse(
-                'posts:post_edit', kwargs={'post_id': '1'}
-            ): 'posts/create_post.html',
         }
 
     def test_uses_correct_template(self):
@@ -151,55 +150,72 @@ class PostViewsTest(TestCase):
             data=form_data,
         )
         first_post = response.context['page_obj'][0]
-        self.assertEqual(first_post.text, 'Новый текст')
+        self.assertEqual(first_post.text, form_data['text'])
 
         response = self.authorized_author.post(
             reverse('posts:group_list', args=['new_group']),
             data=form_data,
         )
-        self.assertEqual(first_post.text, 'Новый текст')
+        self.assertEqual(first_post.text, form_data['text'])
 
         response = self.authorized_author.post(
             reverse('posts:profile', args=[self.author]),
             data=form_data,
         )
-        self.assertEqual(first_post.text, 'Новый текст')
+        self.assertEqual(first_post.text, form_data['text'])
 
         response = self.authorized_client.get(
             reverse('posts:group_list', args=[self.group.slug])
         )
         first_object = response.context['page_obj'][0]
         post_text_0 = first_object.text
-        self.assertEqual(post_text_0, 'Тестовый пост')
+        self.assertEqual(post_text_0, self.post.text)
 
 
 class PaginatorViewsTest(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.user = User.objects.create(
-            username='posts_author',
+        cls.test_user = User.objects.create(
+            username='test_username',
+            email='testmail@gmail.com',
+            password='Qwerty123',
         )
+        cls.authorized_client = Client()
+        cls.authorized_client.force_login(cls.test_user)
         cls.group = Group.objects.create(
-            title='test_title',
-            slug='test_slug',
-            description='Тестовое описание группы',
+            title='Тестовый заголовок',
+            slug='test-group',
+            description='Тестовое описание',
         )
-        cls.post = [
-            Post.objects.create(
-                text='Пост №' + str(i),
-                author=PaginatorViewsTest.user,
-                group=PaginatorViewsTest.group
+        cls.post = Post.objects.bulk_create([
+            Post(
+                author=cls.test_user,
+                group=cls.group,
+                text=f'Тестовый текст поста номер {item}',
             )
-            for i in range(13)]
+            for item in range(13)
+        ])
 
-    def test_index_page_contains_ten_records(self):
-
-        response = self.client.get(reverse('posts:index'))
-        self.assertEqual(len(response.context['page_obj']), 10)
-
-    def test_second_page_contains_three_records(self):
-        response = self.client.get(
-            reverse('posts:index') + '?page=2'
-        )
-        self.assertEqual(len(response.context['page_obj']), 3)
+    def test_paginator_for_index_profile_group(self):
+        """Паджинатор на страницах index, profile, group работает корректно."""
+        first_page_len = FILL
+        second_page_len = Post.objects.count() - FILL
+        context = {
+            reverse('posts:index'): first_page_len,
+            reverse('posts:index') + '?page=2': second_page_len,
+            reverse('posts:group_list', args=[PaginatorViewsTest.group.slug]):
+            first_page_len,
+            reverse('posts:group_list', args=[PaginatorViewsTest.group.slug])
+            + '?page=2': second_page_len,
+            reverse('posts:profile',
+                    args=[PaginatorViewsTest.test_user.username]):
+            first_page_len,
+            reverse('posts:profile',
+                    args=[PaginatorViewsTest.test_user.username]) + '?page=2':
+            second_page_len,
+        }
+        for requested_page, page_len in context.items():
+            with self.subTest(requested_page=requested_page):
+                response = self.authorized_client.get(requested_page)
+                self.assertEqual(len(response.context['page_obj']), page_len)

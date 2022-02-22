@@ -54,13 +54,10 @@ class PostFormsTest(TestCase):
         )
         self.assertEqual(Post.objects.count(), posts_count + 1)
 
-        self.assertTrue(
-            Post.objects.filter(
-                group=self.group,
-                text='new_text',
-                author=self.author,
-            ).exists()
-        )
+        latest_post = Post.objects.first()
+        self.assertEqual(latest_post.text, form_data['text'])
+        self.assertEqual(latest_post.author, self.author)
+        self.assertEqual(latest_post.group, self.group)
 
     def test_edit_post(self):
         form_data = {
@@ -77,7 +74,24 @@ class PostFormsTest(TestCase):
         self.assertRedirects(
             response, reverse('posts:post_detail', args=[self.post.id])
         )
-        edit_post = Post.objects.latest('id')
-        self.assertEqual(edit_post.text, 'editted_text')
+        edit_post = Post.objects.get(id=self.post.id)
+        self.assertEqual(edit_post.text, form_data['text'])
         self.assertEqual(edit_post.author, self.author)
         self.assertEqual(edit_post.group, self.group)
+
+    def test_guest_client_could_not_create_posts(self):
+        posts_before = Post.objects.count()
+        form_data = {
+            'group': self.group.id,
+            'text': 'editted_text',
+            'author': self.guest_client,
+        }
+        response = self.guest_client.post(
+            reverse('posts:post_create'),
+            data=form_data,
+            follow=True,
+        )
+        expected_redirect = str(reverse('users:login') + '?next='
+                                + reverse('posts:post_create'))
+        self.assertRedirects(response, expected_redirect)
+        self.assertEqual(Post.objects.count(), posts_before)
